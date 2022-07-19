@@ -13,7 +13,8 @@ model{
   // standard weakly information priors 
   // see https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
   beta ~ normal(0, 2);
-  sigma ~ exponential(1);
+  //sigma ~ exponential(20);
+  sigma ~ gamma(5, 20);
   growth ~ normal(beta[1] + beta[2] * food, sigma);
 }
 

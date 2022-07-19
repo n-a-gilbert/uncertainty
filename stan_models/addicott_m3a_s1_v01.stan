@@ -15,7 +15,8 @@ model{
   // standard weakly information priors 
   // see https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
   alpha ~ normal(0, 2);
-  sigma ~ exponential(1);
+  //sigma ~ gamma(5, 20);
+  sigma ~ exponential(20);
   ncatch ~ normal(alpha[1] + alpha[2] * nets + alpha[3] * food, sigma);
 }
 

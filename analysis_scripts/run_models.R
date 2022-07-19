@@ -1,4 +1,4 @@
-# 28 June 2022
+# 19 july 2022
 # Neil Gilbert
 # Run models from Addicott et al. (2022) FEE in Stan
 ### to evaluate consequences of not propagating uncertainty 
@@ -8,18 +8,19 @@ library(rstan)
 library(here)
 library(loo)
 library(janitor)
+library(MetBrewer)
+
+#NG - three sample sizes to evaluate
+sample_sizes <- c(25, 100, 1000)
 
 # data simulation from Addicott et al.
 set.seed(1)
+
 # Initialize Parameters and Simulate Data
-n <- 1000 # number of data points to construct
+n <- sample_sizes[3] # number of data points to construct
 
-# error.var.1 <- 0.01 # variance of the idiosyncratic error term
-# error.var.2 <- 0.2 # variance of error process for measurements of catch
-
-# NG - increasing the variance of the error terms
-error.var.1 <- 0.2
-error.var.2 <- 0.5
+error.var.1 <- 0.01 # variance of the idiosyncratic error term
+error.var.2 <- 0.2 # variance of error process for measurements of catch
 
 true.beta <- 0.5 # coefficient on food availability term
 true.gamma <- -0.08 # coefficient on fishing effort term
@@ -52,21 +53,17 @@ df <- tibble(
   ncatch = catch,
   nets = nets)
 
-df
+# loop through and run the models for the three sample sizes
 
-ggplot(df, aes(x = food, y = growth)) + 
-  geom_point() + 
-  geom_smooth()
+loo_tables <- list(list())
+beta_estimates <- list(list())
 
-ggplot(df, aes(x = nets, y = ncatch)) + 
-  geom_point() + 
-  geom_smooth()
-
-#### Model 1 ####
-
-setwd(here::here("stan_models/"))
-write(
- "data {
+for(i in 1:length(sample_sizes)) {
+  
+  #### Model 1 ####
+  setwd(here::here("stan_models/"))
+  write(
+    "data {
   int<lower = 0> N; // number of observations
   vector[N] food; // food availability
   vector[N] ncatch; // catch
@@ -79,10 +76,15 @@ parameters {
 }
 
 model{
-  // standard weakly information priors 
+  // standard weakly information priors for betas
   // see https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
   beta ~ normal(0, 2);
-  sigma ~ exponential(1);
+  // originally used weakly informative exp(1) prior for sigma
+  // but had convergence issues with model #4;
+  // a more informative ~gamma(5, 20) prior got that model to 
+  // converge, so am using it throughout for consistency among models
+  //sigma ~ exponential(1); 
+  sigma ~ gamma(5, 20);
   growth ~ normal(beta[1] + beta[2] * food + beta[3] * ncatch, sigma);
 }
 
@@ -93,44 +95,41 @@ generated quantities {
     log_lik[n] = normal_lpdf(growth[n] | beta[1] + beta[2] * food[n] + beta[3] * ncatch[n], sigma);
   }
 }", "addicott_m1_v01.stan")
-
-ni <- 4000
-nt <- 2
-nb <- ni / 2
-nc <- 4
-
-rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
-set.seed(123)
-
-m1_out <- stan(
-  file = "addicott_m1_v01.stan",
-  data = list(
-    N = nrow(df), 
-    food = df$food,
-    ncatch = df$ncatch, 
-    growth = df$growth),
-  init = lapply(1:nc, function(i)
-    list(beta = rnorm(3),
-         sigma = rexp(1, 1))),
-  pars = c("beta", "sigma", "log_lik"),
-  chains = nc, 
-  iter = ni, 
-  warmup = nb, 
-  thin = nt)
-
-summary(m1_out,
-        pars = c("beta", "sigma"),
-        probs = c(0.025, 0.976))$summary
-
-m1_log_lik <- extract_log_lik(m1_out)
-m1_loo <- loo(m1_log_lik)
-
-#### Model 2 ####
-# Very similar to m1; ncatch covariate is dropped 
-setwd(here::here("stan_models/"))
-write(
- "data {
+  
+  ni <- 4000
+  nt <- 2
+  nb <- ni / 2
+  nc <- 4
+  
+  rstan_options(auto_write = TRUE)
+  options(mc.cores = parallel::detectCores())
+  set.seed(123)
+  
+  m1_out <- stan(
+    file = "addicott_m1_v01.stan",
+    data = list(
+      N = sample_sizes[i], 
+      food = pull(slice(df, 1:sample_sizes[i]), food),
+      ncatch = pull(slice(df, 1:sample_sizes[i]), ncatch), 
+      growth = pull(slice(df, 1:sample_sizes[i]), growth)),
+    init = lapply(1:nc, function(i)
+      list(beta = rnorm(3),
+           sigma = rexp(1, 1))),
+    pars = c("beta", "sigma", "log_lik"),
+    chains = nc, 
+    iter = ni, 
+    warmup = nb, 
+    thin = nt)
+  
+  # leave one out cross validation
+  m1_log_lik <- extract_log_lik(m1_out)
+  m1_loo <- loo(m1_log_lik)
+  
+  #### Model 2 ####
+  # Very similar to m1; ncatch covariate is dropped 
+  setwd(here::here("stan_models/"))
+  write(
+    "data {
   int<lower = 0> N; // number of observations
   vector[N] food; // food availability
   vector[N] growth; // log population growth; response
@@ -142,10 +141,15 @@ parameters {
 }
 
 model{
-  // standard weakly information priors 
+  // standard weakly information priors for betas
   // see https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
   beta ~ normal(0, 2);
-  sigma ~ exponential(1);
+  // originally used weakly informative exp(1) prior for sigma
+  // but had convergence issues with model #4;
+  // a more informative ~gamma(5, 20) prior got that model to 
+  // converge, so am using it throughout for consistency among models
+  //sigma ~ exponential(1); 
+  sigma ~ gamma(5, 20);
   growth ~ normal(beta[1] + beta[2] * food, sigma);
 }
 
@@ -156,52 +160,48 @@ generated quantities {
     log_lik[n] = normal_lpdf(growth[n] | beta[1] + beta[2] * food[n], sigma);
   }
 }", "addicott_m2_v01.stan")
-
-ni <- 4000
-nt <- 2
-nb <- ni / 2
-nc <- 4
-
-rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
-set.seed(123)
-
-m2_out <- stan(
-  file = "addicott_m2_v01.stan",
-  data = list(
-    N = nrow(df), 
-    food = df$food,
-    # ncatch = df$ncatch, 
-    growth = df$growth),
-  init = lapply(1:nc, function(i)
-    list(beta = rnorm(2),
-         # beta1 = rnorm(2), 
-         # beta2 = rnorm(3),
-         sigma = rexp(1, 1))),
-  pars = c("beta", "sigma", "log_lik"),
-  chains = nc, 
-  iter = ni, 
-  warmup = nb, 
-  thin = nt)
-
-summary(m2_out,
-        pars = c("beta", "sigma"),
-        probs = c(0.025, 0.976))$summary
-
-m2_log_lik <- extract_log_lik(m2_out)
-m2_loo <- loo(m2_log_lik)
-
-#### Model 3a ####
-# Here, we follow the 2-stage approach used by Addicott et al. 
-# First, we fit a model in which catch is the response, with nets and food as predictors
-# We generate predicted values from this model, and incorporate point estimates
-# of these predictions as a covariate in the growth model in the second stage
-# Uncertainty is not propogated
-
-# first stage
-setwd(here::here("stan_models/"))
-write(
- "data {
+  
+  ni <- 4000
+  nt <- 2
+  nb <- ni / 2
+  nc <- 4
+  
+  rstan_options(auto_write = TRUE)
+  options(mc.cores = parallel::detectCores())
+  set.seed(123)
+  
+  m2_out <- stan(
+    file = "addicott_m2_v01.stan",
+    data = list(
+      N = sample_sizes[i], 
+      food = pull(slice(df, 1:sample_sizes[i]), food),
+      # ncatch = pull(slice(df, 1:sample_sizes[3]), ncatch), 
+      growth = pull(slice(df, 1:sample_sizes[i]), growth)),
+    init = lapply(1:nc, function(i)
+      list(beta = rnorm(2),
+           # beta1 = rnorm(2), 
+           # beta2 = rnorm(3),
+           sigma = rexp(1, 1))),
+    pars = c("beta", "sigma", "log_lik"),
+    chains = nc, 
+    iter = ni, 
+    warmup = nb, 
+    thin = nt)
+  
+  m2_log_lik <- extract_log_lik(m2_out)
+  m2_loo <- loo(m2_log_lik)
+  
+  #### Model 3a ####
+  # Here, we follow the 2-stage approach used by Addicott et al. 
+  # First, we fit a model in which catch is the response, with nets and food as predictors
+  # We generate predicted values from this model, and incorporate point estimates
+  # of these predictions as a covariate in the growth model in the second stage
+  # Uncertainty is not propogated
+  
+  # first stage
+  setwd(here::here("stan_models/"))
+  write(
+    "data {
   int<lower = 0> N; // number of observations
   vector[N] ncatch; // catch; response
   vector[N] nets; // nets; covariate
@@ -215,10 +215,15 @@ parameters {
 }
 
 model{
-  // standard weakly information priors 
+  // standard weakly information priors for alpha
   // see https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
   alpha ~ normal(0, 2);
-  sigma ~ exponential(1);
+  // originally used weakly informative exp(1) prior for sigma
+  // but had convergence issues with model #4;
+  // a more informative ~exp(20) prior got that model to 
+  // converge, so am using it throughout for consistency among models
+  //sigma ~ exponential(1); 
+  sigma ~ exponential(20);
   ncatch ~ normal(alpha[1] + alpha[2] * nets + alpha[3] * food, sigma);
 }
 
@@ -232,47 +237,45 @@ generated quantities {
   //predicted values
   p_ncatch = normal_rng(alpha[1] + alpha[2] * nets + alpha[3] * food, sigma);
 }", "addicott_m3a_s1_v01.stan")
-
-ni <- 4000
-nt <- 2
-nb <- ni / 2
-nc <- 4
-
-rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
-set.seed(123)
-
-m3a_s1_out <- stan(
-  file = "addicott_m3a_s1_v01.stan",
-  data = list(
-    N = nrow(df), 
-    ncatch = df$ncatch,
-    nets = df$nets,
-    food = df$food),
-  init = lapply(1:nc, function(i)
-    list(alpha = rnorm(3),
-         sigma = rexp(1, 1))),
-  pars = c("alpha", "sigma", "log_lik", "p_ncatch"),
-  chains = nc, 
-  iter = ni, 
-  warmup = nb, 
-  thin = nt)
-
-summary(m3a_s1_out,
-        pars = c("alpha", "sigma"),
-        probs = c(0.025, 0.976))$summary
-
-# create a new dataframe with posterior means of catch predictions as a new column
-df_m3a_s2 <- summary(m3a_s1_out, 
-        pars = c("p_ncatch"))$summary %>% 
-  as_tibble(rownames = "parameter") %>% 
-  dplyr::select(p_ncatch = mean) %>% 
-  cbind(df)
-
-# second stage
-setwd(here::here("stan_models/"))
-write(
-  "data {
+  
+  ni <- 4000
+  nt <- 2
+  nb <- ni / 2
+  nc <- 4
+  
+  rstan_options(auto_write = TRUE)
+  options(mc.cores = parallel::detectCores())
+  set.seed(123)
+  
+  m3a_s1_out <- stan(
+    file = "addicott_m3a_s1_v01.stan",
+    data = list(
+      N = sample_sizes[i], 
+      food = pull(slice(df, 1:sample_sizes[i]), food),
+      ncatch = pull(slice(df, 1:sample_sizes[i]), ncatch), 
+      nets = pull(slice(df, 1:sample_sizes[i]), nets)),
+    init = lapply(1:nc, function(i)
+      list(alpha = rnorm(3),
+           sigma = rexp(1, 1))),
+    pars = c("alpha", "sigma", "log_lik", "p_ncatch"),
+    chains = nc, 
+    iter = ni, 
+    warmup = nb, 
+    thin = nt)
+  
+  df_temp <- slice(df, 1:sample_sizes[i])
+  
+  # create a new dataframe with posterior means of catch predictions as a new column
+  df_m3a_s2 <- summary(m3a_s1_out, 
+                       pars = c("p_ncatch"))$summary %>% 
+    as_tibble(rownames = "parameter") %>% 
+    dplyr::select(p_ncatch = mean) %>% 
+    cbind(df_temp)
+  
+  # second stage
+  setwd(here::here("stan_models/"))
+  write(
+    "data {
   int<lower = 0> N; // number of observations
   vector[N] growth; // log population growth; response
   vector[N] food; // food availability
@@ -285,10 +288,15 @@ parameters {
 }
 
 model{
-  // standard weakly information priors 
+  // standard weakly information priors for betas
   // see https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
   beta ~ normal(0, 2);
-  sigma ~ exponential(1);
+  // originally used weakly informative exp(1) prior for sigma
+  // but had convergence issues with model #4;
+  // a more informative ~gamma(5, 20) prior got that model to 
+  // converge, so am using it throughout for consistency among models
+  //sigma ~ exponential(1); 
+  sigma ~ gamma(5, 20);
   growth ~ normal(beta[1] + beta[2] * food + beta[3] * p_ncatch, sigma);
 }
 
@@ -299,47 +307,42 @@ generated quantities {
     log_lik[n] = normal_lpdf(growth[n] | beta[1] + beta[2] * food[n] + beta[3] * p_ncatch[n], sigma);
   }
 }", "addicott_m3a_s2_v01.stan")
-
-
-ni <- 4000
-nt <- 2
-nb <- ni / 2
-nc <- 4
-
-rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
-set.seed(123)
-
-m3a_s2_out <- stan(
-  file = "addicott_m3a_s2_v01.stan",
-  data = list(
-    N = nrow(df_m3a_s2), 
-    growth = df_m3a_s2$growth,
-    food = df_m3a_s2$food,
-    p_ncatch = df_m3a_s2$p_ncatch),
-  init = lapply(1:nc, function(i)
-    list(beta = rnorm(3),
-         sigma = rexp(1, 1))),
-  pars = c("beta", "sigma", "log_lik"),
-  chains = nc, 
-  iter = ni, 
-  warmup = nb, 
-  thin = nt)
-
-summary(m3a_s2_out,
-        pars = c("beta", "sigma"),
-        probs = c(0.025, 0.976))$summary
-
-m3a_log_lik <- extract_log_lik(m3a_s2_out)
-m3a_loo <- loo(m3a_log_lik)
-
-#### Model 3b ####
-# Here, we will propagate the uncertainty associated with predicted catch
-# in one streamlined model
-
-setwd(here::here("stan_models/"))
-write(
-  "data {
+  
+  ni <- 4000
+  nt <- 2
+  nb <- ni / 2
+  nc <- 4
+  
+  rstan_options(auto_write = TRUE)
+  options(mc.cores = parallel::detectCores())
+  set.seed(123)
+  
+  m3a_s2_out <- stan(
+    file = "addicott_m3a_s2_v01.stan",
+    data = list(
+      N = nrow(df_m3a_s2), 
+      growth = df_m3a_s2$growth,
+      food = df_m3a_s2$food,
+      p_ncatch = df_m3a_s2$p_ncatch),
+    init = lapply(1:nc, function(i)
+      list(beta = rnorm(3),
+           sigma = rexp(1, 1))),
+    pars = c("beta", "sigma", "log_lik"),
+    chains = nc, 
+    iter = ni, 
+    warmup = nb, 
+    thin = nt)
+  
+  m3a_log_lik <- extract_log_lik(m3a_s2_out)
+  m3a_loo <- loo(m3a_log_lik)
+  
+  #### Model 3b ####
+  # Here, we will propagate the uncertainty associated with predicted catch
+  # in one streamlined model
+  
+  setwd(here::here("stan_models/"))
+  write(
+    "data {
   int<lower = 0> N;
   vector[N] food; // food availability
   vector[N] ncatch; // catch
@@ -358,10 +361,13 @@ parameters {
 
 model{
   alpha ~ normal(0, 2); 
-  sigma1 ~ exponential(1);
+  sigma1 ~ exponential(20);
+  //sigma1 ~ exponential(1);
   
   beta ~ normal(0, 2);
-  sigma2 ~ exponential(1);
+  sigma2 ~ gamma(5, 20);
+  //sigma2 ~ exponential(1);
+  
   
   ncatch ~ normal(alpha[1] + alpha[2] * nets + alpha[3] * food, sigma1);
   
@@ -376,95 +382,152 @@ generated quantities {
     log_lik[n] = normal_lpdf(growth[n] | beta[1] + beta[2] * food[n] + beta[3] * p_ncatch[n], sigma2);
   }
 }", "addicott_m3b_v01.stan")
+  
+  # bumping up the iterations/thinning because effective sample size was low
+  ni <- 6000
+  nt <- 3
+  nb <- ni / 2
+  nc <- 4
+  
+  rstan_options(auto_write = TRUE)
+  options(mc.cores = parallel::detectCores())
+  set.seed(123)
+  
+  m3b_out <- stan(
+    file = "addicott_m3b_v01.stan",
+    data = list(
+      N = sample_sizes[i], 
+      ncatch = pull(slice(df, 1:sample_sizes[i]), ncatch), 
+      nets = pull(slice(df, 1:sample_sizes[i]), nets), 
+      food = pull(slice(df, 1:sample_sizes[i]), food), 
+      growth = pull(slice(df, 1:sample_sizes[i]), growth)),
+    init = lapply(1:nc, function(i)
+      list(
+        alpha = rnorm(3),
+        beta = rnorm(3),
+        sigma1 = rexp(1, 1),
+        sigma2 = rexp(1, 1))),
+    pars = c("alpha", "beta",
+             "sigma1", "sigma2", "log_lik"),
+    chains = nc, 
+    iter = ni, 
+    warmup = nb, 
+    thin = nt,
+    control = list(adapt_delta = 0.99)) # to avoid divergent transitions
+  
+  m3b_log_lik <- extract_log_lik(m3b_out)
+  m3b_loo <- loo(m3b_log_lik)
+  
+  # compare models with expected log pointwise predictive density (ELPD)
+  loo_table <- loo_compare(m1_loo, m2_loo, m3a_loo, m3b_loo) %>% 
+    as_tibble(rownames = "model") %>% 
+    add_column(description = c("m1", "m2", "m3: uncertainty", "m3: 2-stage")) %>% 
+    dplyr::select(model = description, elpd_diff:se_looic) %>% 
+    add_column(n = sample_sizes[i])
+  
+  m3b_beta <- summary(
+    m3b_out, 
+    pars = c("beta"),
+    probs = c(0.025, 0.975))$summary %>% 
+    as_tibble(rownames = "parameter") %>% 
+    janitor::clean_names() %>% 
+    filter(parameter == "beta[2]" | parameter == "beta[3]") %>% 
+    dplyr::select(mean, sd, lower95 = x2_5_percent, upper95 = x97_5_percent) %>% 
+    add_column(model = "m3b",
+               predictor = c("food", "catch"))
+  
+  m3a_beta <- summary(
+    m3a_s2_out, 
+    pars = c("beta"),
+    probs = c(0.025, 0.975))$summary %>% 
+    as_tibble(rownames = "parameter") %>% 
+    janitor::clean_names() %>% 
+    filter(parameter == "beta[2]" | parameter == "beta[3]") %>% 
+    dplyr::select(mean, sd, lower95 = x2_5_percent, upper95 = x97_5_percent) %>% 
+    add_column(model = "m3a",
+               predictor = c("food", "catch"))
+  
+  m2_beta <- summary(
+    m2_out, 
+    pars = c("beta"),
+    probs = c(0.025, 0.975))$summary %>% 
+    as_tibble(rownames = "parameter") %>% 
+    janitor::clean_names() %>% 
+    filter(parameter == "beta[2]") %>% 
+    dplyr::select(mean, sd, lower95 = x2_5_percent, upper95 = x97_5_percent) %>% 
+    add_column(model = "m2",
+               predictor = c("food"))
+  
+  m1_beta <- summary(
+    m1_out, 
+    pars = c("beta"),
+    probs = c(0.025, 0.975))$summary %>% 
+    as_tibble(rownames = "parameter") %>% 
+    janitor::clean_names() %>% 
+    filter(parameter == "beta[2]" | parameter == "beta[3]") %>% 
+    dplyr::select(mean, sd, lower95 = x2_5_percent, upper95 = x97_5_percent) %>% 
+    add_column(model = "m1",
+               predictor = c("food", "catch"))
 
-# bumping up the iterations/thinning because effective sample size was low
-ni <- 6000
-nt <- 3
-nb <- ni / 2
-nc <- 4
+  food_beta <- full_join(m1_beta, m2_beta) %>% 
+    full_join(m3a_beta) %>% 
+    full_join(m3b_beta) %>% 
+    add_column(n = sample_sizes[i])
+  
+  loo_tables[[i]] <- loo_table
+  beta_estimates[[i]] <- food_beta
+}
 
-rstan_options(auto_write = TRUE)
-options(mc.cores = parallel::detectCores())
-set.seed(123)
+str(loo_tables)
+str(beta_estimates)
 
-m3b_out <- stan(
-  file = "addicott_m3b_v01.stan",
-  data = list(
-    N = nrow(df),
-    ncatch = df$ncatch,
-    nets = df$nets, 
-    food = df$food, 
-    growth = df$growth),
-  init = lapply(1:nc, function(i)
-    list(
-      alpha = rnorm(3),
-      beta = rnorm(3),
-      sigma1 = rexp(1, 1),
-      sigma2 = rexp(1, 1))),
-  pars = c("alpha", "beta",
-           "sigma1", "sigma2", "log_lik"),
-  chains = nc, 
-  iter = ni, 
-  warmup = nb, 
-  thin = nt)
+do.call(rbind, loo_tables) %>% 
+  dplyr::select(n, model, elpd_diff, se_diff)
 
-summary(m3b_out,
-        pars = c("alpha", "beta", "sigma1", "sigma2"),
-        probs = c(0.025, 0.975))$summary
+pal <- MetPalettes$Demuth[[1]][c(2, 4, 9)]
 
-m3b_log_lik <- extract_log_lik(m3b_out)
-m3b_loo <- loo(m3b_log_lik)
+# visualize estimated effect of food availability from the models
+do.call(rbind, beta_estimates) %>% 
+  filter(predictor == "food") %>% 
+  mutate(model_name = ifelse(model == "m1", "Naive (biased)",
+                             ifelse(model == "m2", "Simple (unbiased)",
+                                    ifelse(model == "m3a",
+                                           "Two-stage (no uncertainty)",
+                                           "Two-stage (uncertainty)")))) %>% 
+  ggplot(aes(x = mean, y = model_name, color = factor(n))) + 
+  geom_vline(xintercept = 0.5, color = "gray50", linetype = "dashed") +
+  geom_errorbar(aes(xmin = lower95, xmax = upper95), width = 0,
+                position = position_dodge(width = 0.4),
+                size = 1.25) +
+  geom_point(position =  position_dodge(width = 0.4),
+             size = 2) +
+  scale_color_manual("Sample size",
+                     values = pal) + 
+  theme_minimal() +
+  xlab("Estimated effect of food availability") +
+  theme(axis.title.y = element_blank(),
+        axis.title.x = element_text(color = "black"),
+        axis.text = element_text(color = "black"),
+        legend.text = element_text(color = "black"), 
+        legend.title = element_text(color = "black"))
 
-# compare models with expected log pointwise predictive density (ELPD)
-loo_compare(m1_loo, m2_loo, m3a_loo, m3b_loo) %>% 
-  as_tibble(rownames = "model") %>% 
-  add_column(description = c("m1", "m2", "m3: uncertainty", "m3: 2-stage")) %>% 
-  dplyr::select(model = description, elpd_diff:se_looic)
+setwd(here::here("results"))
+betas <- do.call(rbind, beta_estimates)
+write_csv(betas, "beta_estimates_original_sigmas_v01.csv")
+loo_tabs <- do.call(rbind, loo_tables)
+write_csv(loo_tabs, "loo_tables_v01.csv")
 
-m3b_beta <- summary(
-  m3b_out, 
-  pars = c("beta"),
-  probs = c(0.025, 0.975))$summary %>% 
-  as_tibble(rownames = "parameter") %>% 
-  janitor::clean_names() %>% 
-  filter(parameter == "beta[2]") %>% 
-  dplyr::select(mean, sd, lower95 = x2_5_percent, upper95 = x97_5_percent) %>% 
-  add_column(model = "m3b")
+setwd(here::here("figures"))
+ggsave("beta_estimates_plot_v01.png", 
+       width = 5, 
+       height = 3, 
+       units = "in", 
+       dpi = 300)
 
-m3a_beta <- summary(
-  m3a_s2_out, 
-  pars = c("beta"),
-  probs = c(0.025, 0.975))$summary %>% 
-  as_tibble(rownames = "parameter") %>% 
-  janitor::clean_names() %>% 
-  filter(parameter == "beta[2]") %>% 
-  dplyr::select(mean, sd, lower95 = x2_5_percent, upper95 = x97_5_percent) %>% 
-  add_column(model = "m3a")
-
-m2_beta <- summary(
-  m2_out, 
-  pars = c("beta"),
-  probs = c(0.025, 0.975))$summary %>% 
-  as_tibble(rownames = "parameter") %>% 
-  janitor::clean_names() %>% 
-  filter(parameter == "beta[2]") %>% 
-  dplyr::select(mean, sd, lower95 = x2_5_percent, upper95 = x97_5_percent) %>% 
-  add_column(model = "m2")
-
-m1_beta <- summary(
-  m1_out, 
-  pars = c("beta"),
-  probs = c(0.025, 0.975))$summary %>% 
-  as_tibble(rownames = "parameter") %>% 
-  janitor::clean_names() %>% 
-  filter(parameter == "beta[2]") %>% 
-  dplyr::select(mean, sd, lower95 = x2_5_percent, upper95 = x97_5_percent) %>% 
-  add_column(model = "m1")
-
-full_join(m1_beta, m2_beta) %>% 
-  full_join(m3a_beta) %>% 
-  full_join(m3b_beta) %>% 
-  ggplot(aes(x = mean, y = model)) +
-  geom_vline(xintercept = 0.5, color = "red") +
-  geom_errorbar(aes(xmin = lower95, xmax = upper95), width = 0) +
-  geom_point()
+# compute relative magnitude of posterior SDs
+betas %>% 
+  filter(predictor == "food") %>%
+  filter(grepl("m3", model)) %>% 
+  dplyr::select(model, n, sd) %>% 
+  pivot_wider(names_from = "model", values_from = sd) %>% 
+  mutate(percent_sd = m3b / m3a)

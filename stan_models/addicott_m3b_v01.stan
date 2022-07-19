@@ -17,10 +17,13 @@ parameters {
 
 model{
   alpha ~ normal(0, 2); 
-  sigma1 ~ exponential(1);
+  sigma1 ~ exponential(20);
+  //sigma1 ~ exponential(1);
   
   beta ~ normal(0, 2);
-  sigma2 ~ exponential(1);
+  sigma2 ~ gamma(5, 20);
+  //sigma2 ~ exponential(20);
+  
   
   ncatch ~ normal(alpha[1] + alpha[2] * nets + alpha[3] * food, sigma1);
   
