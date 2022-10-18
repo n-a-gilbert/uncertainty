@@ -523,7 +523,7 @@ loo_tabs <- do.call(rbind, loo_tables)
 write_csv(loo_tabs, "loo_tables_v01.csv")
 
 setwd(here::here("figures"))
-ggsave("gilbert_figure1.jpg", 
+ggsave("gilbert_figure1.jpeg", 
        width = 5, 
        height = 3, 
        units = "in", 
