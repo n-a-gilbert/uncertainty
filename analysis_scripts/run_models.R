@@ -494,7 +494,8 @@ do.call(rbind, beta_estimates) %>%
                                     ifelse(model == "m3a",
                                            "Two-stage (no uncertainty)",
                                            "Two-stage (uncertainty)")))) %>% 
-  ggplot(aes(x = mean, y = model_name, color = factor(n))) + 
+  ggplot(aes(x = mean, y = model_name, color = factor(n,
+                                                      levels = c(1000, 100, 25)))) + 
   geom_vline(xintercept = 0.5, color = "gray50", linetype = "dashed") +
   geom_errorbar(aes(xmin = lower95, xmax = upper95), width = 0,
                 position = position_dodge(width = 0.4),
@@ -502,14 +503,18 @@ do.call(rbind, beta_estimates) %>%
   geom_point(position =  position_dodge(width = 0.4),
              size = 2) +
   scale_color_manual("Sample size",
-                     values = pal) + 
-  theme_minimal() +
+                     values = pal, 
+                     guide = guide_legend(reverse = TRUE)) + 
+  theme_classic() +
   xlab("Estimated effect of food availability") +
   theme(axis.title.y = element_blank(),
-        axis.title.x = element_text(color = "black"),
-        axis.text = element_text(color = "black"),
-        legend.text = element_text(color = "black"), 
-        legend.title = element_text(color = "black"))
+        axis.title.x = element_text(color = "black", size = 8),
+        axis.text = element_text(color = "black", size = 7),
+        legend.text = element_text(color = "black", size = 7), 
+        legend.title = element_text(color = "black", size = 7),
+        axis.line = element_line(color = "black", size = 0.2),
+        axis.ticks = element_line(color = "black", size = 0.2))
+
 
 setwd(here::here("results"))
 betas <- do.call(rbind, beta_estimates)
@@ -518,7 +523,7 @@ loo_tabs <- do.call(rbind, loo_tables)
 write_csv(loo_tabs, "loo_tables_v01.csv")
 
 setwd(here::here("figures"))
-ggsave("beta_estimates_plot_v01.png", 
+ggsave("gilbert_figure1.jpg", 
        width = 5, 
        height = 3, 
        units = "in", 
