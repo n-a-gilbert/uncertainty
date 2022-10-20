@@ -2,6 +2,8 @@
 
 ### [Neil A. Gilbert](https://gilbertecology.com), [Harold N. Eyster](http://eyster.com/), & [Elise F. Zipkin](https://zipkinlab.org/)
 
+### Code/Data DOI: [![DOI](https://zenodo.org/badge/508345833.svg)](https://zenodo.org/badge/latestdoi/508345833)
+
 #### Please contact the first author for questions about the code or data: Neil A. Gilbert (neil.allen.gilbert@gmail.com)
 __________________________________________________________________________________________________________________________________________
 
